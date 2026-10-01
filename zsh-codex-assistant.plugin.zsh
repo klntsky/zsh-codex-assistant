@@ -1,7 +1,6 @@
 [[ -o interactive ]] || return
-typeset -g _ZCA_LOADED=1
 
-# zpty is bundled with zsh; each interactive shell owns one named Codex PTY.
+# Each shell gives Codex its own virtual terminal, managed by Zsh's zpty module.
 zmodload zsh/zpty || {
   print -u2 'zsh-codex-assistant: zsh/zpty unavailable'
   return 1
@@ -15,7 +14,6 @@ typeset -g _zca_plugin_dir=${${(%):-%x}:A:h}
 typeset -g _zca_session_dir=${_zca_session_dir-}
 typeset -g _zca_session_id=${_zca_session_id-}
 typeset -g _zca_completed_turn=${_zca_completed_turn-}
-typeset -g _zca_had_turn=${_zca_had_turn:-0}
 
 _zca_read_session() {
   local saved completed
@@ -57,7 +55,7 @@ _zca_write() {
 }
 
 _zca_submit() {
-  # Bracketed paste keeps multiline text as one Codex submission; CR presses Enter.
+  # Paste the whole prompt, then press Enter. This keeps multiline input together.
   _zca_write $'\e[200~'"$1"$'\e[201~\r'
 }
 
@@ -65,13 +63,7 @@ _zca_start() {
   _zca_alive && return 0
   _zca_read_session
 
-  # Never silently replace a completed conversation when its ID could not be saved.
-  if (( _zca_had_turn )) && [[ -z $_zca_session_id ]]; then
-    print -u2 'zsh-codex-assistant: session ID unavailable; use codex resume to recover the conversation'
-    return 1
-  fi
-
-  # A terminated process still reserves its PTY name until explicitly removed.
+  # Release the old terminal's name before starting a replacement.
   zpty -d "$_zca_pty" 2>/dev/null
 
   (( $+commands[codex] )) || {
@@ -84,7 +76,7 @@ _zca_start() {
     return 1
   fi
 
-  # zpty starts with a 0x0 window; set its size before Codex initializes its UI.
+  # Give Codex the terminal size before it draws its interface.
   local rows=${LINES:-24} cols=${COLUMNS:-80}
   (( rows > 0 )) || rows=24
   (( cols > 0 )) || cols=80
@@ -98,17 +90,13 @@ _zca_start() {
   _zca_config_string "$_zca_session_dir/id"
   notify_config+="$REPLY]"
 
-  # --no-alt-screen leaves output visible; notify records actual turn completion.
-  local cmd="stty rows $rows cols $cols; command codex -C ${(q)PWD} --no-alt-screen -a never \
+  # Keep replies in the scrollback and have the helper record each finished turn.
+  local cmd="stty rows $rows cols $cols; command codex -C ${(q)PWD} --no-alt-screen \
 -c 'tui.raw_output_mode=false' \
--c 'tui.animations=true' \
--c 'tui.terminal_title=[]' \
--c 'tui.notifications=[\"agent-turn-complete\"]' \
--c 'tui.notification_method=\"bel\"' \
--c 'tui.notification_condition=\"always\"'"
+-c 'tui.animations=true'"
   cmd+=" -c ${(q)notify_config}"
 
-  # Initial input must survive startup, terminal probing, and onboarding screens.
+  # Pass the first prompt at startup so Codex handles it once it's ready.
   if [[ -n $_zca_session_id ]]; then
     cmd+=" resume -- ${(q)_zca_session_id}"
     [[ -n ${1-} ]] && cmd+=" ${(q)1}"
@@ -117,7 +105,7 @@ _zca_start() {
     [[ -n ${1-} ]] && initial_prompt+=$'\n\n'"$1"
     cmd+=" -- ${(q)initial_prompt}"
   fi
-  # Nonblocking reads deliver terminal output even when it has no trailing newline.
+  # Read output as it arrives to keep the interface responsive.
   zpty -b "$_zca_pty" "$cmd" || return 1
   _zca_cwd=$PWD
 }
@@ -125,20 +113,20 @@ _zca_start() {
 _zca_sync_cwd() {
   [[ $PWD == $_zca_cwd ]] && return 0
 
-  # The Codex process is long-lived, so explicitly move its working directory with the shell.
+  # Keep the running Codex session in the shell's current directory.
   _zca_submit "/cd $PWD" || return 1
   _zca_cwd=$PWD
 }
 
 _zca_interrupt() {
-  # Interrupt the current Codex turn without killing the persistent Codex process.
+  # Send Ctrl-C to Codex to interrupt the current reply.
   _zca_alive && _zca_write $'\003'
 }
 
 _zca_drain() {
   local chunk
 
-  # Forward already-buffered terminal output unchanged, including bells.
+  # Show any output that's already waiting, including bells.
   while zpty -rt "$_zca_pty" chunk 2>/dev/null; do
     print -nr -- "$chunk"
   done
@@ -148,33 +136,26 @@ _zca_wait() {
   local previous_turn=${1-} chunk key cancelled=0
   setopt localtraps
 
-  # Ctrl-C is forwarded to Codex, then this shell command returns 130.
+  # Ctrl-C interrupts Codex and returns to the shell with status 130.
   trap '_zca_interrupt; cancelled=1' INT
 
   while _zca_alive; do
     (( cancelled )) && return 130
     if zpty -r "$_zca_pty" chunk; then
-      if (( cancelled )); then
-        print -nr -- "$chunk"
-        return 130
-      fi
-
       print -nr -- "$chunk"
-    elif (( cancelled )); then
-      return 130
     fi
+    (( cancelled )) && return 130
 
-    # A queued BEL or replayed terminal output cannot complete the current prompt.
+    # Return when the helper records a different completed turn.
     _zca_read_session
     if [[ -n $_zca_completed_turn && $_zca_completed_turn != $previous_turn ]]; then
-      _zca_had_turn=1
-      # Let the TUI render the final response after the notification callback.
+      # Give Codex a moment to draw the end of the reply.
       zselect -t 5 2>/dev/null
       _zca_drain
       return 0
     fi
 
-    # Forward terminal replies and input for login/trust screens as well as turns.
+    # Pass through keystrokes and terminal responses, including during login.
     if [[ -t 0 ]]; then
       if read -rsk1 -t 0.03 key; then
         [[ $key == $'\n' ]] && key=$'\r'
@@ -197,7 +178,7 @@ _zca_ask() {
   _zca_read_session
   local previous_turn=$_zca_completed_turn
 
-  # Give Codex shell history it could not otherwise observe. Terminal output is never captured.
+  # Put the shell history before the user's question.
   if (( ${#_zca_shell_delta} )); then
     prompt=$'New shell history context (may not be relevant):\n'"${(F)_zca_shell_delta}"$'\n\n---\n\n'"$prompt"
   fi
@@ -212,46 +193,18 @@ _zca_ask() {
   _zca_wait "$previous_turn"
 }
 
-_zca_interactive() {
-  emulate -L zsh
-  local chunk key
-  setopt localtraps
-  trap '_zca_interrupt' INT
-
-  _zca_start || return
-  _zca_sync_cwd || return
-
-  _zca_write $'\f'
-
-  # Relay input and output until Codex exits; no detach shortcut.
-  while _zca_alive; do
-    while zpty -rt "$_zca_pty" chunk 2>/dev/null; do
-      print -nr -- "$chunk"
-    done
-
-    if read -rsk1 -t 0.03 key; then
-      while true; do
-        [[ $key == $'\n' ]] && key=$'\r'
-        _zca_write "$key"
-        read -rsk1 -t 0 key || break
-      done
-    fi
-  done
-
-  print
-}
-
-# Explicit entry point: pass a prompt, or attach to the live session with bare @.
+# Send a question to the shell's Codex session.
 function @ {
+  if (( $# == 0 )); then
+    print -u2 -- 'Usage: @ <prompt>'
+    return 2
+  fi
+
   {
-    if (( $# )); then
-      _zca_ask "$*"
-    else
-      _zca_interactive
-    fi
+    _zca_ask "$*"
   } always {
     _zca_read_session
-    # Codex remains alive, so undo its terminal input modes when returning to Zsh.
+    # Restore the terminal for Zsh while Codex stays running.
     if [[ -t 1 ]]; then
       print -nr -- $'\e[?2026l\e[?1004l\e[?2004l\e[<u\e[>4;0m\e[?25h\e[0m'
     fi
@@ -261,7 +214,7 @@ function @ {
 _zca_preexec() {
   [[ $1 == '@' || $1 == '@ '* ]] && return
 
-  # Keep commands executed directly by zsh; they are sent on the next Codex turn.
+  # Save shell commands to include with the next question.
   _zca_shell_delta+=("$1")
 }
 
