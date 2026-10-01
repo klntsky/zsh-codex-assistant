@@ -2,6 +2,8 @@
 
 An on-demand codex session attached to your zsh shell. You can bring it forward any time, shell context is preserved.
 
+[![zsh-codex-assistant demo](https://asciinema.org/a/1267244.svg)](https://asciinema.org/a/1267244)
+
 ## How it works
 
 Use `@ your prompt` to hop into Codex anytime.
