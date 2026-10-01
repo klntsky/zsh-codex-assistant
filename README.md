@@ -29,7 +29,7 @@ I decided to build this because none of the existing tools were quite satisfacto
 - I do not want to trust a pile of overcomplicated slop for my root shell (there are plenty of other projects for AI in the shell that suffer from feature bloat)
 - I only need codex support
 
-If you need LLM command generation in-place, check out [zsh-ai](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/zsh-ai) - it's decent.
+If you need LLM command generation in-place, check out [zsh-ai](https://github.com/matheusml/zsh-ai) - it's decent.
 
 ## Install
 
