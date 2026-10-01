@@ -96,6 +96,14 @@ _zca_start() {
 -c 'tui.animations=true'"
   cmd+=" -c ${(q)notify_config}"
 
+  # Apply optional model and profile overrides when starting Codex.
+  if [[ -n ${ZSH_CODEX_ASSISTANT_MODEL-} ]]; then
+    cmd+=" --model=${(q)ZSH_CODEX_ASSISTANT_MODEL}"
+  fi
+  if [[ -n ${ZSH_CODEX_ASSISTANT_PROFILE-} ]]; then
+    cmd+=" --profile=${(q)ZSH_CODEX_ASSISTANT_PROFILE}"
+  fi
+
   # Pass the first prompt at startup so Codex handles it once it's ready.
   if [[ -n $_zca_session_id ]]; then
     cmd+=" resume -- ${(q)_zca_session_id}"
@@ -208,15 +216,35 @@ function @ {
     if [[ -t 1 ]]; then
       print -nr -- $'\e[?2026l\e[?1004l\e[?2004l\e[<u\e[>4;0m\e[?25h\e[0m'
     fi
+    if _zca_alive; then
+      print -u2 -- 'Codex keeps running in the background. Type "@ your prompt" to continue.'
+    fi
   }
 }
 
 _zca_preexec() {
-  [[ $1 == '@' || $1 == '@ '* ]] && return
+  [[ $1 == '@' || $1 == '@ '* || $1 == '\@ '* ]] && return
 
   # Save shell commands to include with the next question.
   _zca_shell_delta+=("$1")
 }
+
+_zca_accept_line() {
+  emulate -L zsh
+  if [[ -z $PREBUFFER && $BUFFER == '@ '* ]]; then
+    local prompt=${BUFFER#'@ '}
+    # Quote the question before shell parsing. The escaped @ also makes
+    # recalled history execute directly, preserving the original question.
+    BUFFER="\\@ ${(q)prompt}"
+  fi
+  zle _zca_original_accept_line
+}
+
+# Keep the existing Enter handler, including customizations from other plugins.
+if (( ! ${+widgets[_zca_original_accept_line]} )); then
+  zle -A accept-line _zca_original_accept_line
+  zle -N accept-line _zca_accept_line
+fi
 
 typeset -ga preexec_functions
 (( ${preexec_functions[(Ie)_zca_preexec]} )) || preexec_functions+=(_zca_preexec)
