@@ -31,15 +31,18 @@ The plugin overrides Codex's `notify` command with its helper, enables animation
 
 Prompts are sent as bracketed paste followed by Enter. Ctrl-C is forwarded to the child. Before returning to Zsh, the plugin resets terminal input/display modes. Bells pass through unchanged.
 
+Before each request, a screenful of newlines moves the current display into scrollback. The cursor returns to the top, and a reused Codex process receives Ctrl-L to redraw. Output filtering removes `ESC[3J` and `ESC[?3J` (saved-line erasure), buffering partial sequences across reads. Ordinary screen and line erasures still reach the terminal so the TUI can redraw. This adds blank space between invocations; retained output remains subject to the terminal's scrollback limit.
+
 ## Checks
 
 ```sh
 zsh -n zsh-codex-assistant.plugin.zsh
 zsh -n session-notify.zsh
+zsh -fic 'source tests/terminal-output.zsh'
 git diff --check
 ```
 
-There is currently no committed automated test suite. Useful regression cases are consecutive questions, restart/resume, cancellation, history ordering, bell forwarding, and unset/empty/quoted model and profile overrides. Stub Codex for transport tests to avoid model requests.
+The output-filter tests cover split sequences, repeated erasures, colors, bells, Unicode, and redirected output. Further regression cases include consecutive questions, restart/resume, cancellation, history ordering, and unset/empty/quoted model and profile overrides. Stub Codex for transport tests to avoid model requests.
 
 ## Known limitations
 

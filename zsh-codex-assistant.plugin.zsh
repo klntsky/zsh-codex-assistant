@@ -14,6 +14,7 @@ typeset -g _zca_plugin_dir=${${(%):-%x}:A:h}
 typeset -g _zca_session_dir=${_zca_session_dir-}
 typeset -g _zca_session_id=${_zca_session_id-}
 typeset -g _zca_completed_turn=${_zca_completed_turn-}
+typeset -g _zca_output_pending=${_zca_output_pending-}
 
 _zca_read_session() {
   local saved completed
@@ -114,6 +115,7 @@ _zca_start() {
     cmd+=" -- ${(q)initial_prompt}"
   fi
   # Read output as it arrives to keep the interface responsive.
+  _zca_output_pending=''
   zpty -b "$_zca_pty" "$cmd" || return 1
   _zca_cwd=$PWD
 }
@@ -131,12 +133,45 @@ _zca_interrupt() {
   _zca_alive && _zca_write $'\003'
 }
 
+_zca_output() {
+  emulate -L zsh
+  local data="$_zca_output_pending$1" output='' prefix
+  _zca_output_pending=''
+
+  # Filter scrollback erasure, keeping partial sequences for the next read.
+  while [[ $data == *$'\e'* ]]; do
+    prefix=${data%%$'\e'*}
+    output+=$prefix
+    data=${data#"$prefix"}
+    case $data in
+      $'\e[3J'*) data=${data[5,-1]} ;;
+      $'\e[?3J'*) data=${data[6,-1]} ;;
+      $'\e'|$'\e['|$'\e[3'|$'\e[?'|$'\e[?3')
+        _zca_output_pending=$data
+        data=''
+        break ;;
+      *) output+=$'\e'; data=${data[2,-1]} ;;
+    esac
+  done
+  print -nr -- "$output$data"
+}
+
+_zca_prepare_screen() {
+  emulate -L zsh
+  [[ -t 1 ]] || return 0
+  local rows=${LINES:-24}
+  (( rows > 0 )) || rows=24
+  # Push the shell output into scrollback and give Codex a fresh screen.
+  repeat $rows print
+  print -nr -- $'\e[H'
+}
+
 _zca_drain() {
   local chunk
 
   # Show any output that's already waiting, including bells.
   while zpty -rt "$_zca_pty" chunk 2>/dev/null; do
-    print -nr -- "$chunk"
+    _zca_output "$chunk"
   done
 }
 
@@ -150,7 +185,7 @@ _zca_wait() {
   while _zca_alive; do
     (( cancelled )) && return 130
     if zpty -r "$_zca_pty" chunk; then
-      print -nr -- "$chunk"
+      _zca_output "$chunk"
     fi
     (( cancelled )) && return 130
 
@@ -191,7 +226,10 @@ _zca_ask() {
     prompt=$'New shell history context (may not be relevant):\n'"${(F)_zca_shell_delta}"$'\n\n---\n\n'"$prompt"
   fi
 
+  _zca_prepare_screen
   if _zca_alive; then
+    # Redraw the persistent UI on the fresh screen.
+    _zca_write $'\f' || return
     _zca_sync_cwd || return
     _zca_submit "$prompt" || return
   else
