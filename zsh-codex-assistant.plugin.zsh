@@ -7,6 +7,8 @@ zmodload zsh/zpty || {
 }
 zmodload zsh/zselect || return 1
 
+# State belongs to this interactive shell. The callback writes only the state
+# file; the foreground plugin owns the PTY, buffered output, and shell history.
 typeset -g _zca_pty=${_zca_pty:-"zsh-codex-assistant-$$"}
 typeset -g _zca_cwd=${_zca_cwd-}
 typeset -ga _zca_shell_delta
@@ -16,6 +18,8 @@ typeset -g _zca_session_id=${_zca_session_id-}
 typeset -g _zca_completed_turn=${_zca_completed_turn-}
 typeset -g _zca_output_pending=${_zca_output_pending-}
 
+# An absent or invalid file leaves the last valid IDs intact. In particular,
+# the conversation ID must survive a child exit so the next request can resume.
 _zca_read_session() {
   local saved completed
   if [[ -n $_zca_session_dir && -r $_zca_session_dir/id ]]; then
@@ -105,7 +109,8 @@ _zca_start() {
     cmd+=" --profile=${(q)ZSH_CODEX_ASSISTANT_PROFILE}"
   fi
 
-  # Pass the first prompt at startup so Codex handles it once it's ready.
+  # Startup consumes the first prompt. Sending it again through the PTY would
+  # create a second turn; later prompts use _zca_submit instead.
   if [[ -n $_zca_session_id ]]; then
     cmd+=" resume -- ${(q)_zca_session_id}"
     [[ -n ${1-} ]] && cmd+=" ${(q)1}"
@@ -136,16 +141,18 @@ _zca_interrupt() {
 _zca_output() {
   emulate -L zsh
   local data="$_zca_output_pending$1" output='' prefix
+  local erase_saved_lines=$'\e[3J' erase_saved_lines_private=$'\e[?3J'
   _zca_output_pending=''
 
-  # Filter scrollback erasure, keeping partial sequences for the next read.
+  # Codex may redraw the visible screen, but must not erase earlier scrollback.
+  # Keep incomplete escape prefixes because a PTY read can end mid-sequence.
   while [[ $data == *$'\e'* ]]; do
     prefix=${data%%$'\e'*}
     output+=$prefix
     data=${data#"$prefix"}
     case $data in
-      $'\e[3J'*) data=${data[5,-1]} ;;
-      $'\e[?3J'*) data=${data[6,-1]} ;;
+      $'\e[3J'*) data=${data#"$erase_saved_lines"} ;;
+      $'\e[?3J'*) data=${data#"$erase_saved_lines_private"} ;;
       $'\e'|$'\e['|$'\e[3'|$'\e[?'|$'\e[?3')
         _zca_output_pending=$data
         data=''
@@ -189,7 +196,8 @@ _zca_wait() {
     fi
     (( cancelled )) && return 130
 
-    # Return when the helper records a different completed turn.
+    # The callback writes a conversation/turn pair after Codex finishes. A
+    # changed pair is the only completion signal available to this PTY loop.
     _zca_read_session
     if [[ -n $_zca_completed_turn && $_zca_completed_turn != $previous_turn ]]; then
       # Give Codex a moment to draw the end of the reply.
@@ -235,6 +243,8 @@ _zca_ask() {
   else
     _zca_start "$prompt" || return
   fi
+  # Clear history only after the PTY write reports success. On a reported
+  # failure, the next request still carries those commands.
   _zca_shell_delta=()
   _zca_wait "$previous_turn"
 }
