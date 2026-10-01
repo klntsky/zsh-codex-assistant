@@ -33,6 +33,8 @@ If you need LLM command generation in-place, check out [zsh-ai](https://github.c
 
 Requires Zsh and an installed, signed-in Codex CLI. Make sure `codex` works first.
 
+### Install manually
+
 Clone this repository, then add this line to your `~/.zshrc`, using the path where you cloned it:
 
 ```zsh
@@ -42,6 +44,29 @@ source /path/to/zsh-codex-assistant/zsh-codex-assistant.plugin.zsh
 Open a new terminal to load the plugin.
 
 Load it after plugins that customize the Enter key if you have any.
+
+### With zplug
+
+Add this alongside your other zplug declarations in `~/.zshrc`, after any
+plugins that customize the Enter key and before `zplug load`:
+
+```zsh
+zplug "klntsky/zsh-codex-assistant", use:"zsh-codex-assistant.plugin.zsh"
+```
+
+Open a new terminal, run `zplug install`, then open another new terminal to
+load the plugin. Your `~/.zshrc` should already call `zplug load` after the
+declarations.
+
+If you already cloned this repository and want zplug to use that checkout,
+register its path instead:
+
+```zsh
+zplug "/path/to/zsh-codex-assistant", from:local, use:"zsh-codex-assistant.plugin.zsh"
+```
+
+Local checkouts do not need `zplug install`. Put the declaration before your
+existing `zplug load` line, then open a new terminal.
 
 ## Optional settings
 
