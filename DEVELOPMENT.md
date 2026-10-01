@@ -13,15 +13,13 @@ The helper writes an owner-only temporary file and renames it over the state fil
 
 ## Configuration and terminal handling
 
-The Enter widget reads lines beginning with `@ ` before shell parsing and quotes
-the question as one argument. It saves and calls the previous `accept-line`
-widget. This follows the prefix-interception approach in
-[zsh-ai](https://github.com/matheusml/zsh-ai/blob/main/lib/widget.zsh) and the
-binding-preservation approach in
-[Zsh-Opencode-Tab](https://github.com/alberti42/Zsh-Opencode-Tab).
+The Enter widget reads lines beginning with `@ ` before shell parsing. It saves
+the original line in history, displays it through `POSTDISPLAY`, and accepts an
+empty input buffer. A `precmd` hook takes the pending question, clears it, and
+calls `@ "$prompt"` directly.
+Ordinary commands call the saved `accept-line` widget.
 
-Submitted history uses an escaped `\@` command with a shell-quoted argument.
-Recalling it executes the original question without another quoting pass.
+History recall brings back the original text for editing and resubmission.
 Continuation prompts retain normal shell parsing. This interception applies to
 interactive line editing; calls from scripts use normal shell quoting.
 Load after other Enter customizations; keys bound to

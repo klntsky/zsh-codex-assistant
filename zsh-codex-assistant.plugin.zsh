@@ -232,12 +232,27 @@ _zca_preexec() {
 _zca_accept_line() {
   emulate -L zsh
   if [[ -z $PREBUFFER && $BUFFER == '@ '* ]]; then
-    local prompt=${BUFFER#'@ '}
-    # Quote the question before shell parsing. The escaped @ also makes
-    # recalled history execute directly, preserving the original question.
-    BUFFER="\\@ ${(q)prompt}"
+    # Keep the typed line in history and on screen while accepting an empty line.
+    print -rs -- "$BUFFER"
+    typeset -g _zca_pending_prompt=${BUFFER#'@ '}
+    local shown=$BUFFER
+    BUFFER=''
+    (( $+functions[_zsh_autosuggest_clear] )) && _zsh_autosuggest_clear
+    POSTDISPLAY=$shown
+    zle .accept-line
+    return
   fi
   zle _zca_original_accept_line
+}
+
+_zca_precmd() {
+  emulate -L zsh
+  if (( ${+_zca_pending_prompt} )); then
+    local prompt=$_zca_pending_prompt
+    unset _zca_pending_prompt
+    @ "$prompt"
+  fi
+  return 0
 }
 
 # Keep the existing Enter handler, including customizations from other plugins.
@@ -248,5 +263,7 @@ fi
 
 typeset -ga preexec_functions
 (( ${preexec_functions[(Ie)_zca_preexec]} )) || preexec_functions+=(_zca_preexec)
+typeset -ga precmd_functions
+(( ${precmd_functions[(Ie)_zca_precmd]} )) || precmd_functions+=(_zca_precmd)
 typeset -ga zshexit_functions
 (( ${zshexit_functions[(Ie)_zca_cleanup]} )) || zshexit_functions+=(_zca_cleanup)
