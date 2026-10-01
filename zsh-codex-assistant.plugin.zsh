@@ -115,8 +115,11 @@ _zca_start() {
     cmd+=" resume -- ${(q)_zca_session_id}"
     [[ -n ${1-} ]] && cmd+=" ${(q)1}"
   else
-    local initial_prompt='Act as a shell assistant'
-    [[ -n ${1-} ]] && initial_prompt+=$'\n\n'"$1"
+    local initial_prompt=${ZSH_CODEX_ASSISTANT_INITIAL_PROMPT-'Act as a shell assistant'}
+    if [[ -n ${1-} ]]; then
+      [[ -n $initial_prompt ]] && initial_prompt+=$'\n\n'
+      initial_prompt+="$1"
+    fi
     cmd+=" -- ${(q)initial_prompt}"
   fi
   # Read output as it arrives to keep the interface responsive.

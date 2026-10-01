@@ -19,8 +19,6 @@ This depends on Codex's rollout filenames and metadata format. If the callback n
 
 Prompts are sent as bracketed paste. Ctrl-C is forwarded to Codex. The plugin uses `--no-alt-screen` and filters scrollback erase sequences so earlier output remains visible. It resets terminal modes before returning to Zsh.
 
-Load the plugin after other Enter-key customizations. Widgets that bypass `accept-line` also bypass its `@ ` shortcut. Model and profile settings are read when the Codex process starts; changing them does not alter a running process.
-
 ## Checks
 
 ```sh

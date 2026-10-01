@@ -70,9 +70,10 @@ existing `zplug load` line, then open a new terminal.
 
 ## Optional settings
 
-Add either setting to `~/.zshrc`:
+Add any of these settings to `~/.zshrc`:
 
 ```zsh
 export ZSH_CODEX_ASSISTANT_MODEL="your-model"
 export ZSH_CODEX_ASSISTANT_PROFILE="your-profile"
+export ZSH_CODEX_ASSISTANT_INITIAL_PROMPT="Act as a shell assistant"
 ```
