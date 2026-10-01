@@ -138,9 +138,8 @@ _zca_interrupt() {
 _zca_drain() {
   local chunk
 
-  # Print already-buffered terminal output without ringing terminal bells.
+  # Forward already-buffered terminal output unchanged, including bells.
   while zpty -rt "$_zca_pty" chunk 2>/dev/null; do
-    chunk=${chunk//$'\a'/}
     print -nr -- "$chunk"
   done
 }
@@ -156,12 +155,10 @@ _zca_wait() {
     (( cancelled )) && return 130
     if zpty -r "$_zca_pty" chunk; then
       if (( cancelled )); then
-        chunk=${chunk//$'\a'/}
         print -nr -- "$chunk"
         return 130
       fi
 
-      chunk=${chunk//$'\a'/}
       print -nr -- "$chunk"
     elif (( cancelled )); then
       return 130
@@ -224,10 +221,9 @@ _zca_interactive() {
   _zca_start || return
   _zca_sync_cwd || return
 
-  print -u2 -- $'\n[zsh-codex-assistant: Ctrl-] returns to zsh]\n'
   _zca_write $'\f'
 
-  # Small relay loop: PTY output -> terminal, terminal keystrokes -> the same live Codex PTY.
+  # Relay input and output until Codex exits; no detach shortcut.
   while _zca_alive; do
     while zpty -rt "$_zca_pty" chunk 2>/dev/null; do
       print -nr -- "$chunk"
@@ -235,12 +231,6 @@ _zca_interactive() {
 
     if read -rsk1 -t 0.03 key; then
       while true; do
-        # Ctrl-] detaches from Codex but leaves the process and conversation alive.
-        if [[ $key == $'\035' ]]; then
-          print
-          return 0
-        fi
-
         [[ $key == $'\n' ]] && key=$'\r'
         _zca_write "$key"
         read -rsk1 -t 0 key || break
@@ -271,9 +261,8 @@ function @ {
 _zca_preexec() {
   [[ $1 == '@' || $1 == '@ '* ]] && return
 
-  # Keep only recent commands executed directly by zsh; they are sent on the next Codex turn.
+  # Keep commands executed directly by zsh; they are sent on the next Codex turn.
   _zca_shell_delta+=("$1")
-  (( ${#_zca_shell_delta} > 20 )) && shift _zca_shell_delta
 }
 
 typeset -ga preexec_functions
